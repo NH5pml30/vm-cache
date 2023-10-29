@@ -55,18 +55,7 @@ rep_t measure(std::span<uintptr_t> span, size_t n_iters);
 
 using rep_t = std::chrono::nanoseconds::rep;
 
-__attribute__((noinline)) rep_t measure(std::span<uintptr_t> span,
-                                        size_t n_iters) {
-  uintptr_t *start_ptr = span.data();
-
-  // warm up?
-  volatile uintptr_t *ptr = start_ptr;
-  do {
-    ptr = reinterpret_cast<volatile uintptr_t *>(*ptr);
-  } while (ptr != start_ptr);
-
-  auto start = std::chrono::high_resolution_clock::now();
-
+void loop(uintptr_t *start_ptr, size_t n_iters) {
   // do not unroll the loop
 #pragma GCC unroll 1
   for (size_t i = 0; i < n_iters; i++) {
@@ -75,6 +64,18 @@ __attribute__((noinline)) rep_t measure(std::span<uintptr_t> span,
       ptr = reinterpret_cast<volatile uintptr_t *>(*ptr);
     } while (ptr != start_ptr);
   }
+}
+
+__attribute__((noinline)) rep_t measure(std::span<uintptr_t> span,
+                                        size_t n_iters) {
+  uintptr_t *start_ptr = span.data();
+
+  // warm up?
+  loop(start_ptr, n_iters);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  loop(start_ptr, n_iters);
 
   auto end = std::chrono::high_resolution_clock::now();
   return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
@@ -133,23 +134,21 @@ cache_info_t detect(size_t max_waysize, size_t max_assoc, double jump_rel,
       sum += time;
       n_measurements++;
     }
-    // assume that associativity is even
-    if (jump % 2 != 0) {
-      jump--;
-      std::cout << "-> assuming associativity is even, go back to jump = "
-                << jump << "\n";
-    }
 
-    if (!last_jumps.empty() && last_jumps.back() >= 0 && jump >= 0) {
-      if (jump == last_jumps.back() * 2) {
+    if (!last_jumps.empty() && last_jumps.back() >= 0 && jump != last_jumps.back()) {
+      if (jump == last_jumps.back() * 2)
         break;
-      } else if (jump != last_jumps.back()) {
-        std::cout << "-> rollback\n";
-        last_jumps.pop_back();
-        last_ws.pop_back();
-        ws *= 2;
-        continue;
+      if (jump == (last_jumps.back() - 1) * 2) {
+        last_jumps.back()--;
+        std::cout << "assuming last jump was late, returning to " << last_jumps.back() << "\n";
+        break;
       }
+
+      std::cout << "-> rollback\n";
+      last_jumps.pop_back();
+      last_ws.pop_back();
+      ws *= 2;
+      continue;
     }
     last_jumps.push_back(jump);
     last_ws.push_back(ws);
