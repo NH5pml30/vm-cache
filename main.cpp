@@ -11,6 +11,7 @@
 #include <optional>
 #include <random>
 #include <ranges>
+#include <memory>
 #include <span>
 
 #include <sched.h>
@@ -69,10 +70,6 @@ void loop(uintptr_t *start_ptr, size_t n_iters) {
 __attribute__((noinline)) rep_t measure(std::span<uintptr_t> span,
                                         size_t n_iters) {
   uintptr_t *start_ptr = span.data();
-
-  // warm up?
-  loop(start_ptr, n_iters);
-
   auto start = std::chrono::high_resolution_clock::now();
 
   loop(start_ptr, n_iters);
@@ -148,6 +145,7 @@ cache_info_t detect(size_t max_waysize, size_t max_assoc, double jump_rel,
       last_jumps.pop_back();
       last_ws.pop_back();
       ws *= 2;
+      jump_rel *= 0.97;
       continue;
     }
     last_jumps.push_back(jump);
