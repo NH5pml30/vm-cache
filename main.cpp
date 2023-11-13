@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -12,7 +11,6 @@
 #include <random>
 #include <ranges>
 #include <memory>
-#include <span>
 
 #include <sched.h>
 
@@ -38,12 +36,13 @@ __attribute__((noinline)) void reset_cache(volatile std::byte *ptr,
     ptr[i] = std::byte(0);
 }
 
-void shuffle(std::span<uintptr_t> span, size_t stride, auto &random_engine) {
+template<typename RandEngT>
+void shuffle(uintptr_t *span, size_t size, size_t stride, RandEngT &random_engine) {
   // Sattolo's algorithm
-  for (size_t i = 0; i < span.size() / stride; i++)
+  for (size_t i = 0; i < size / stride; i++)
     span[i * stride] = reinterpret_cast<uintptr_t>(&span[i * stride]);
 
-  size_t i = span.size() / stride;
+  size_t i = size / stride;
   while (i > 1) {
     i--;
     size_t j = std::uniform_int_distribution<size_t>(0, i - 1)(random_engine);
@@ -52,7 +51,7 @@ void shuffle(std::span<uintptr_t> span, size_t stride, auto &random_engine) {
 }
 
 using rep_t = std::chrono::nanoseconds::rep;
-rep_t measure(std::span<uintptr_t> span, size_t n_iters);
+rep_t measure(uintptr_t *span, size_t size, size_t n_iters);
 
 using rep_t = std::chrono::nanoseconds::rep;
 
@@ -67,9 +66,9 @@ void loop(uintptr_t *start_ptr, size_t n_iters) {
   }
 }
 
-__attribute__((noinline)) rep_t measure(std::span<uintptr_t> span,
+__attribute__((noinline)) rep_t measure(uintptr_t *span, size_t size,
                                         size_t n_iters) {
-  uintptr_t *start_ptr = span.data();
+  uintptr_t *start_ptr = span;
   auto start = std::chrono::high_resolution_clock::now();
 
   loop(start_ptr, n_iters);
@@ -79,17 +78,18 @@ __attribute__((noinline)) rep_t measure(std::span<uintptr_t> span,
       .count();
 }
 
-auto measure_ws_assoc(std::span<std::byte> data, size_t waysize, size_t assoc,
-                      size_t n_sum_iters, size_t n_min_iters, auto &rand_eng) {
-  assert(data.size() >= assoc * waysize);
+template<typename RandEngT>
+auto measure_ws_assoc(std::byte *data, size_t size, size_t waysize, size_t assoc,
+                      size_t n_sum_iters, size_t n_min_iters, RandEngT &rand_eng) {
+  assert(size >= assoc * waysize);
 
   // select the minimum time
   rep_t min = std::numeric_limits<long long>::max();
   for (size_t i = 0; i < n_min_iters; i++) {
-    auto span = std::span(reinterpret_cast<uintptr_t *>(data.data()),
-                          assoc * waysize / sizeof(uintptr_t));
-    shuffle(span, waysize / sizeof(uintptr_t), rand_eng);
-    min = std::min(min, measure(span, n_sum_iters));
+    uintptr_t *span = reinterpret_cast<uintptr_t *>(data);
+    size_t size = assoc * waysize / sizeof(uintptr_t);
+    shuffle(span, size, waysize / sizeof(uintptr_t), rand_eng);
+    min = std::min(min, measure(span, size, n_sum_iters));
   }
   return min * 1.0 / assoc;
 }
@@ -116,7 +116,7 @@ cache_info_t detect(size_t max_waysize, size_t max_assoc, double jump_rel,
     ptrdiff_t jump = -1;
     for (size_t assoc = 1; assoc < max_assoc; assoc++) {
       std::cout << "  Assoc = " << assoc << "\n";
-      auto time = measure_ws_assoc(std::span(data.get(), max_mem), ws, assoc,
+      auto time = measure_ws_assoc(data.get(), max_mem, ws, assoc,
                                    n_sum_iters, n_min_iters, eng);
       double avg = sum / n_measurements;
       double rel = time / avg;
@@ -201,3 +201,4 @@ int main() {
             << cache_assoc << "-way set associative" << std::endl;
   return 0;
 }
+
